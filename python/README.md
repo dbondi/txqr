@@ -58,6 +58,24 @@ Use `-` for stdin/stdout. Encode options: `--split` (chunk size), `--redundancy`
 (fountain overhead, default 2.0), `--fps`, `--box-size`, `--border`, and
 `--level` (`low`/`medium`/`high`/`highest` QR error correction).
 
+### Higher throughput: N QR codes per frame
+
+Pack several QR codes into each animation frame as a grid of parallel
+"screens" with `--per-frame N`. Each frame then carries N fountain blocks, so
+the same data plays in roughly N× fewer frames (≈ N× the throughput at a fixed
+FPS):
+
+```bash
+# 9 QR codes per frame in a 3x3 grid -> ~9x throughput
+python -m pytxqr.cli encode input.bin -o out.gif --split 100 --fps 5 --per-frame 9
+python -m pytxqr.cli decode out.gif -o recovered.bin
+```
+
+`--cols` sets the grid width (default near-square) and `--gap` the spacing
+between tiles. Decoding is automatic — the reader detects every QR code in
+each frame. Because the transport is fountain-coded, if a detector misses a
+tile in one frame it is simply covered by another, so no tile is critical.
+
 ## Library usage
 
 ```python

@@ -76,6 +76,33 @@ def test_full_qr_gif_pipeline():
         assert dec.data() == data
 
 
+def test_tiled_multi_screen_pipeline():
+    # Pack several QR codes per animation frame for higher throughput.
+    data = b"High-throughput tiled QR transfer. " * 8
+    frames = Encoder(60).encode(data)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "tiled.gif")
+        per_frame = 4
+        n = write_animated_gif(frames, path, fps=5, per_frame=per_frame)
+        # ~per_frame fewer animation frames than QR codes.
+        import math
+        assert n == math.ceil(len(frames) / per_frame)
+
+        decoded = read_animated_gif(path)
+        dec = Decoder()
+        for f in decoded:
+            if not f:
+                continue
+            try:
+                dec.decode(f)
+            except ValueError:
+                continue
+            if dec.is_completed():
+                break
+        assert dec.is_completed()
+        assert dec.data() == data
+
+
 if __name__ == "__main__":
     test_single_frame()
     test_multi_frame_exact()
@@ -83,4 +110,5 @@ if __name__ == "__main__":
     test_with_dropped_frames()
     test_binary_data()
     test_full_qr_gif_pipeline()
+    test_tiled_multi_screen_pipeline()
     print("All tests passed.")

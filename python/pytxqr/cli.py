@@ -39,13 +39,21 @@ def cmd_encode(args: argparse.Namespace) -> int:
         frames,
         args.output,
         fps=args.fps,
+        per_frame=args.per_frame,
+        cols=args.cols,
+        gap=args.gap,
         box_size=args.box_size,
         border=args.border,
         level=args.level,
     )
+    qr_per_sec = args.per_frame * args.fps
+    extra = ""
+    if args.per_frame > 1:
+        extra = (f", {args.per_frame} QR/frame -> {qr_per_sec} QR/s "
+                 f"(~{args.per_frame}x throughput)")
     print(
-        f"Encoded {len(data)} bytes into {n} QR frames -> {args.output} "
-        f"({args.fps} fps)",
+        f"Encoded {len(data)} bytes into {len(frames)} QR codes "
+        f"across {n} animation frames -> {args.output} ({args.fps} fps{extra})",
         file=sys.stderr,
     )
     return 0
@@ -98,6 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
     enc.add_argument("--redundancy", type=float, default=2.0,
                      help="fountain-code redundancy factor (default: 2.0)")
     enc.add_argument("--fps", type=int, default=5, help="animation FPS")
+    enc.add_argument("--per-frame", type=int, default=1,
+                     help="QR codes shown per animation frame (parallel "
+                          "screens) to multiply throughput (default: 1)")
+    enc.add_argument("--cols", type=int, default=None,
+                     help="columns in the per-frame grid (default: near-square)")
+    enc.add_argument("--gap", type=int, default=16,
+                     help="pixel gap between tiled QR codes (default: 16)")
     enc.add_argument("--box-size", type=int, default=8, help="QR pixel size")
     enc.add_argument("--border", type=int, default=4, help="QR quiet-zone size")
     enc.add_argument("--level", default="medium",
