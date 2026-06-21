@@ -100,61 +100,40 @@ def encode_block(block_id: int, chunks: Sequence[bytes]) -> bytes:
 
 
 class LTDecoder:
-    """Belief-propagation (peeling) decoder for LT fountain codes."""
+    """Online Gaussian-elimination decoder for LT fountain codes over GF(2).
+
+    Each received block is a linear equation over the source chunks: a set of
+    source indices (the coefficient row) plus the XORed bytes (the right-hand
+    side). Maintaining the system in row-echelon form means the data is
+    recoverable as soon as ``num_chunks`` linearly-independent blocks have
+    arrived -- *any* such set works. This avoids the extra overhead and
+    occasional stalls of pure belief-propagation (peeling), which only makes
+    progress when a degree-one block happens to be available.
+    """
 
     def __init__(self, num_chunks: int, chunk_len: int):
         self.num_chunks = num_chunks
         self.chunk_len = chunk_len
+        # pivot index -> [coeffs:set, data:bytearray]; coeffs' min == key.
+        self._pivots: dict[int, list] = {}
         self.recovered: List[bytes | None] = [None] * num_chunks
-        self.num_recovered = 0
-        # Pending encoded blocks: list of [set_of_unknown_indices, data].
-        self._pending: List[list] = []
 
     def add_block(self, block_id: int, data: bytes) -> None:
-        """Add a received encoded block and run peeling reduction."""
-        indices = set(source_blocks_for(block_id, self.num_chunks))
+        """Add a received block and reduce it into the echelon system."""
+        coeffs = set(source_blocks_for(block_id, self.num_chunks))
         block_data = bytearray(data)
 
-        # Reduce against already recovered source chunks.
-        for idx in list(indices):
-            if self.recovered[idx] is not None:
-                self._xor_into(block_data, self.recovered[idx])
-                indices.discard(idx)
-
-        if not indices:
-            return  # No new information.
-
-        self._pending.append([indices, block_data])
-        self._propagate()
-
-    def _propagate(self) -> None:
-        """Repeatedly resolve degree-1 blocks until none remain."""
-        progress = True
-        while progress:
-            progress = False
-            for entry in self._pending:
-                indices, block_data = entry
-                if len(indices) == 1:
-                    (idx,) = tuple(indices)
-                    if self.recovered[idx] is None:
-                        self.recovered[idx] = bytes(block_data)
-                        self.num_recovered += 1
-                        progress = True
-                    indices.clear()
-
-            if progress:
-                # Substitute newly recovered chunks into remaining blocks.
-                still_pending: List[list] = []
-                for indices, block_data in self._pending:
-                    if not indices:
-                        continue
-                    for idx in list(indices):
-                        if self.recovered[idx] is not None:
-                            self._xor_into(block_data, self.recovered[idx])
-                            indices.discard(idx)
-                    if indices:
-                        still_pending.append([indices, block_data])
-                self._pending = still_pending
+        # Reduce against existing pivot rows until a new pivot or empty row.
+        while coeffs:
+            p = min(coeffs)
+            pivot = self._pivots.get(p)
+            if pivot is None:
+                self._pivots[p] = [coeffs, block_data]  # new pivot
+                break
+            pc, pd = pivot
+            coeffs ^= pc  # GF(2) row addition on coefficients
+            self._xor_into(block_data, pd)
+        # If coeffs became empty the block was linearly dependent: discard.
 
     @staticmethod
     def _xor_into(dst: bytearray, src: bytes) -> None:
@@ -162,10 +141,21 @@ class LTDecoder:
             dst[i] ^= src[i]
 
     def is_complete(self) -> bool:
-        return self.num_recovered == self.num_chunks
+        return len(self._pivots) == self.num_chunks
 
     def data(self) -> bytes:
-        """Return reassembled padded data (caller trims to true length)."""
+        """Back-substitute the echelon system and return the padded data."""
         if not self.is_complete():
             raise ValueError("decoding not yet complete")
+
+        # Every source index is a pivot; back-substitute high index -> low.
+        for p in sorted(self._pivots, reverse=True):
+            coeffs, d = self._pivots[p]
+            out = bytearray(d)
+            for q in coeffs:
+                if q != p:
+                    # q > p (p was the row minimum), so already solved.
+                    self._xor_into(out, self.recovered[q])  # type: ignore[arg-type]
+            self.recovered[p] = bytes(out)
+
         return b"".join(self.recovered)  # type: ignore[arg-type]

@@ -14,6 +14,7 @@ import argparse
 import sys
 
 from .bench import format_table, simulate
+from .colorcode import read_color_gif, write_color_gif
 from .protocol import Decoder, Encoder
 from .qr import read_animated_gif, write_animated_gif
 
@@ -36,6 +37,17 @@ def _write_output(path: str, data: bytes) -> None:
 def cmd_encode(args: argparse.Namespace) -> int:
     data = _read_input(args.input)
     frames = Encoder(args.split, redundancy=args.redundancy).encode(data)
+
+    if args.codec == "color":
+        n = write_color_gif(frames, args.output, fps=args.fps)
+        print(
+            f"Encoded {len(data)} bytes into {len(frames)} color codes "
+            f"across {n} animation frames -> {args.output} ({args.fps} fps, "
+            "HCCB-style 3 bits/cell)",
+            file=sys.stderr,
+        )
+        return 0
+
     n = write_animated_gif(
         frames,
         args.output,
@@ -61,7 +73,10 @@ def cmd_encode(args: argparse.Namespace) -> int:
 
 
 def cmd_decode(args: argparse.Namespace) -> int:
-    frames = read_animated_gif(args.input)
+    if args.codec == "color":
+        frames = read_color_gif(args.input)
+    else:
+        frames = read_animated_gif(args.input)
     dec = Decoder()
     read = 0
     for frame in frames:
@@ -131,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     enc = sub.add_parser("encode", help="encode data into an animated QR GIF")
     enc.add_argument("input", help="input file ('-' for stdin)")
     enc.add_argument("-o", "--output", default="out.gif", help="output GIF")
+    enc.add_argument("--codec", choices=["qr", "color"], default="qr",
+                     help="symbology: 'qr' or HCCB-style 'color' "
+                          "(~3 bits/cell) (default: qr)")
     enc.add_argument("--split", type=int, default=100,
                      help="chunk size per QR frame (default: 100)")
     enc.add_argument("--redundancy", type=float, default=2.0,
@@ -154,6 +172,8 @@ def build_parser() -> argparse.ArgumentParser:
     dec.add_argument("input", help="input animated GIF")
     dec.add_argument("-o", "--output", default="-",
                      help="output file ('-' for stdout)")
+    dec.add_argument("--codec", choices=["qr", "color"], default="qr",
+                     help="symbology used to encode (default: qr)")
     dec.set_defaults(func=cmd_decode)
 
     bench = sub.add_parser(

@@ -15,6 +15,12 @@ Typical use::
     assert dec.data() == b"hello world"
 """
 
+from .colorcode import (
+    decode_color,
+    encode_color,
+    read_color_gif,
+    write_color_gif,
+)
 from .protocol import Decoder, Encoder
 from .qr import (
     decode_qr,
@@ -30,6 +36,10 @@ __all__ = [
     "decode_qr",
     "write_animated_gif",
     "read_animated_gif",
+    "encode_color",
+    "decode_color",
+    "write_color_gif",
+    "read_color_gif",
 ]
 
 __version__ = "0.1.0"

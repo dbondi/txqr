@@ -103,6 +103,49 @@ def test_tiled_multi_screen_pipeline():
         assert dec.data() == data
 
 
+def test_hccb_color_code_roundtrip():
+    from pytxqr.colorcode import decode_color, encode_color
+
+    for n in (1, 50, 777, 3000):
+        data = os.urandom(n)
+        img = encode_color(data, cell=8)
+        assert decode_color(img, cell=8) == data
+
+
+def test_hccb_density_vs_qr():
+    import base64
+
+    from pytxqr.colorcode import encode_color
+    from pytxqr.qr import encode_qr
+
+    data = os.urandom(600)
+    qr = encode_qr(base64.b64encode(data).decode(), box_size=10, border=4)
+    cc = encode_color(data, cell=10, border=20)
+    qr_density = len(data) / (qr.width * qr.height)
+    cc_density = len(data) / (cc.width * cc.height)
+    # Color code should be several times denser per pixel than QR.
+    assert cc_density > 3 * qr_density
+
+
+def test_hccb_full_gif_pipeline():
+    from pytxqr.colorcode import read_color_gif, write_color_gif
+
+    data = b"HCCB color-barcode transfer of this payload. " * 4
+    frames = Encoder(60).encode(data)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "color.gif")
+        write_color_gif(frames, path, fps=5)
+        dec = Decoder()
+        for f in read_color_gif(path):
+            if not f:
+                continue
+            dec.decode(f)
+            if dec.is_completed():
+                break
+        assert dec.is_completed()
+        assert dec.data() == data
+
+
 def test_bench_simulation():
     from pytxqr.bench import simulate
 
@@ -129,5 +172,8 @@ if __name__ == "__main__":
     test_binary_data()
     test_full_qr_gif_pipeline()
     test_tiled_multi_screen_pipeline()
+    test_hccb_color_code_roundtrip()
+    test_hccb_density_vs_qr()
+    test_hccb_full_gif_pipeline()
     test_bench_simulation()
     print("All tests passed.")

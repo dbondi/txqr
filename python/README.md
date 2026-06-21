@@ -76,6 +76,24 @@ between tiles. Decoding is automatic — the reader detects every QR code in
 each frame. Because the transport is fountain-coded, if a detector misses a
 tile in one frame it is simply covered by another, so no tile is critical.
 
+### HCCB-style color codec (higher density)
+
+QR codes use 1 bit per black/white module. The `color` codec is an HCCB-style
+(High Capacity Color Barcode) symbology that uses 8 well-separated colors = **3
+bits per cell**, for a large areal-density gain:
+
+```bash
+python -m pytxqr.cli encode input.bin -o out.gif --codec color
+python -m pytxqr.cli decode out.gif   -o recovered.bin --codec color
+```
+
+Measured at equal cell/module pixel size, the color codec packs the same
+payload into **~6–7× fewer pixels** than QR (3× from color, plus avoiding QR's
+base64, structural, and ECC overhead). It is a lossless software-pipeline codec
+(it relies on the GIF palette preserving the 8 colors exactly), so unlike a
+real camera link it needs no color calibration or finder patterns — those would
+be required to make it camera-robust, which would claw back some of the gain.
+
 ### Throughput benchmark
 
 Simulate playback and measure *goodput* (original bytes recovered per second):
