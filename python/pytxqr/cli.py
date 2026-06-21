@@ -1,0 +1,210 @@
+"""Command-line interface for pytxqr.
+
+Subcommands::
+
+    pytxqr encode <input> -o out.gif      # data  -> animated QR GIF
+    pytxqr decode <in.gif> -o output      # animated QR GIF -> data
+
+Use ``-`` for stdin/stdout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from .bench import format_table, simulate
+from .colorcode import read_color_gif, write_color_gif
+from .protocol import Decoder, Encoder
+from .qr import read_animated_gif, write_animated_gif
+
+
+def _read_input(path: str) -> bytes:
+    if path == "-":
+        return sys.stdin.buffer.read()
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _write_output(path: str, data: bytes) -> None:
+    if path == "-":
+        sys.stdout.buffer.write(data)
+        return
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def cmd_encode(args: argparse.Namespace) -> int:
+    data = _read_input(args.input)
+    frames = Encoder(args.split, redundancy=args.redundancy).encode(data)
+
+    if args.codec == "color":
+        n = write_color_gif(frames, args.output, fps=args.fps)
+        print(
+            f"Encoded {len(data)} bytes into {len(frames)} color codes "
+            f"across {n} animation frames -> {args.output} ({args.fps} fps, "
+            "HCCB-style 3 bits/cell)",
+            file=sys.stderr,
+        )
+        return 0
+
+    n = write_animated_gif(
+        frames,
+        args.output,
+        fps=args.fps,
+        per_frame=args.per_frame,
+        cols=args.cols,
+        gap=args.gap,
+        box_size=args.box_size,
+        border=args.border,
+        level=args.level,
+    )
+    qr_per_sec = args.per_frame * args.fps
+    extra = ""
+    if args.per_frame > 1:
+        extra = (f", {args.per_frame} QR/frame -> {qr_per_sec} QR/s "
+                 f"(~{args.per_frame}x throughput)")
+    print(
+        f"Encoded {len(data)} bytes into {len(frames)} QR codes "
+        f"across {n} animation frames -> {args.output} ({args.fps} fps{extra})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_decode(args: argparse.Namespace) -> int:
+    if args.codec == "color":
+        frames = read_color_gif(args.input)
+    else:
+        frames = read_animated_gif(args.input)
+    dec = Decoder()
+    read = 0
+    for frame in frames:
+        if not frame:
+            continue
+        try:
+            dec.decode(frame)
+            read += 1
+        except ValueError:
+            continue
+        if dec.is_completed():
+            break
+
+    if not dec.is_completed():
+        print(
+            f"Incomplete: decoded {read}/{len(frames)} frames, "
+            "not enough to reconstruct data",
+            file=sys.stderr,
+        )
+        return 1
+
+    data = dec.data()
+    _write_output(args.output, data)
+    print(
+        f"Recovered {len(data)} bytes from {read} frames -> {args.output}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    if args.sweep:
+        configs = [
+            dict(split=100, per_frame=1, fps=5),
+            dict(split=100, per_frame=1, fps=10),
+            dict(split=100, per_frame=4, fps=10),
+            dict(split=100, per_frame=9, fps=10),
+            dict(split=100, per_frame=25, fps=10),
+            dict(split=200, per_frame=9, fps=10),
+            dict(split=300, per_frame=16, fps=15),
+        ]
+        results = [
+            simulate(nbytes=args.bytes, redundancy=args.redundancy,
+                     drop=args.drop, trials=args.trials, seed=args.seed, **c)
+            for c in configs
+        ]
+    else:
+        results = [simulate(
+            nbytes=args.bytes, split=args.split, per_frame=args.per_frame,
+            fps=args.fps, redundancy=args.redundancy, drop=args.drop,
+            trials=args.trials, seed=args.seed,
+        )]
+
+    print(f"Simulated goodput ({args.bytes} B payload, "
+          f"{args.trials} trials each):", file=sys.stderr)
+    print(format_table(results))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="pytxqr",
+        description="Transfer data via animated QR codes (Python TXQR).",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    enc = sub.add_parser("encode", help="encode data into an animated QR GIF")
+    enc.add_argument("input", help="input file ('-' for stdin)")
+    enc.add_argument("-o", "--output", default="out.gif", help="output GIF")
+    enc.add_argument("--codec", choices=["qr", "color"], default="qr",
+                     help="symbology: 'qr' or HCCB-style 'color' "
+                          "(~3 bits/cell) (default: qr)")
+    enc.add_argument("--split", type=int, default=100,
+                     help="chunk size per QR frame (default: 100)")
+    enc.add_argument("--redundancy", type=float, default=2.0,
+                     help="fountain-code redundancy factor (default: 2.0)")
+    enc.add_argument("--fps", type=int, default=5, help="animation FPS")
+    enc.add_argument("--per-frame", type=int, default=1,
+                     help="QR codes shown per animation frame (parallel "
+                          "screens) to multiply throughput (default: 1)")
+    enc.add_argument("--cols", type=int, default=None,
+                     help="columns in the per-frame grid (default: near-square)")
+    enc.add_argument("--gap", type=int, default=16,
+                     help="pixel gap between tiled QR codes (default: 16)")
+    enc.add_argument("--box-size", type=int, default=8, help="QR pixel size")
+    enc.add_argument("--border", type=int, default=4, help="QR quiet-zone size")
+    enc.add_argument("--level", default="medium",
+                     choices=["low", "medium", "high", "highest"],
+                     help="QR error-correction level")
+    enc.set_defaults(func=cmd_encode)
+
+    dec = sub.add_parser("decode", help="decode an animated QR GIF into data")
+    dec.add_argument("input", help="input animated GIF")
+    dec.add_argument("-o", "--output", default="-",
+                     help="output file ('-' for stdout)")
+    dec.add_argument("--codec", choices=["qr", "color"], default="qr",
+                     help="symbology used to encode (default: qr)")
+    dec.set_defaults(func=cmd_decode)
+
+    bench = sub.add_parser(
+        "bench", help="simulate playback and report data goodput")
+    bench.add_argument("--bytes", type=int, default=4096,
+                       help="payload size to simulate (default: 4096)")
+    bench.add_argument("--split", type=int, default=100,
+                       help="chunk size per QR frame (default: 100)")
+    bench.add_argument("--per-frame", type=int, default=9,
+                       help="QR codes per animation frame (default: 9)")
+    bench.add_argument("--fps", type=int, default=10, help="animation FPS")
+    bench.add_argument("--redundancy", type=float, default=2.0,
+                       help="fountain-code redundancy factor (default: 2.0)")
+    bench.add_argument("--drop", type=float, default=0.0,
+                       help="per-QR miss probability, 0..1 (default: 0.0)")
+    bench.add_argument("--trials", type=int, default=5,
+                       help="simulations to average (default: 5)")
+    bench.add_argument("--seed", type=int, default=None,
+                       help="RNG seed for reproducible runs")
+    bench.add_argument("--sweep", action="store_true",
+                       help="run a preset sweep of configurations")
+    bench.set_defaults(func=cmd_bench)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
