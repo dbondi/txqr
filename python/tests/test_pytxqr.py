@@ -103,6 +103,24 @@ def test_tiled_multi_screen_pipeline():
         assert dec.data() == data
 
 
+def test_bench_simulation():
+    from pytxqr.bench import simulate
+
+    # No drops: always completes, goodput scales with per_frame * fps.
+    base = simulate(nbytes=2048, split=100, per_frame=1, fps=10,
+                    trials=3, seed=7)
+    tiled = simulate(nbytes=2048, split=100, per_frame=9, fps=10,
+                     trials=3, seed=7)
+    assert base.completed_ratio == 1.0
+    assert tiled.completed_ratio == 1.0
+    assert tiled.goodput > base.goodput  # tiling raises throughput
+
+    # With drops, extra redundancy still recovers the data.
+    dropped = simulate(nbytes=2048, split=100, per_frame=9, fps=10,
+                       drop=0.2, redundancy=3.0, trials=3, seed=7)
+    assert dropped.completed_ratio == 1.0
+
+
 if __name__ == "__main__":
     test_single_frame()
     test_multi_frame_exact()
@@ -111,4 +129,5 @@ if __name__ == "__main__":
     test_binary_data()
     test_full_qr_gif_pipeline()
     test_tiled_multi_screen_pipeline()
+    test_bench_simulation()
     print("All tests passed.")

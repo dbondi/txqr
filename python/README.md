@@ -76,6 +76,36 @@ between tiles. Decoding is automatic — the reader detects every QR code in
 each frame. Because the transport is fountain-coded, if a detector misses a
 tile in one frame it is simply covered by another, so no tile is critical.
 
+### Throughput benchmark
+
+Simulate playback and measure *goodput* (original bytes recovered per second):
+
+```bash
+python -m pytxqr.cli bench --sweep              # preset config sweep
+python -m pytxqr.cli bench --split 100 --per-frame 9 --fps 10 --drop 0.2 --redundancy 3.0
+```
+
+Example sweep (4 KB payload, in-memory decode):
+
+```
+ split  per_frame  fps  redund  drop  anim played    time      goodput    ok
+----------------------------------------------------------------------------
+   100          1   10     2.0  0.00       82/110   8.20s    499.5 B/s  100%
+   100          9   10     2.0  0.00        10/13   1.00s     4.0 KB/s  100%
+   100         25   10     2.0  0.00          4/5   0.40s    10.0 KB/s  100%
+   300         16   15     2.0  0.00          3/3   0.20s    20.0 KB/s  100%
+```
+
+Goodput scales linearly with `split × per_frame × fps`. A rule of thumb:
+
+```
+goodput (B/s) ≈ split × per_frame × fps × 0.5
+```
+
+where `0.5 ≈ 0.75 (base64 efficiency) ÷ 1.5 (fountain decode overhead)`. These
+are protocol/algorithm limits; a real screen→camera link is further bounded by
+display resolution and camera frame rate. `--drop` models missed camera reads.
+
 ## Library usage
 
 ```python

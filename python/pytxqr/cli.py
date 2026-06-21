@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .bench import format_table, simulate
 from .protocol import Decoder, Encoder
 from .qr import read_animated_gif, write_animated_gif
 
@@ -91,6 +92,35 @@ def cmd_decode(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bench(args: argparse.Namespace) -> int:
+    if args.sweep:
+        configs = [
+            dict(split=100, per_frame=1, fps=5),
+            dict(split=100, per_frame=1, fps=10),
+            dict(split=100, per_frame=4, fps=10),
+            dict(split=100, per_frame=9, fps=10),
+            dict(split=100, per_frame=25, fps=10),
+            dict(split=200, per_frame=9, fps=10),
+            dict(split=300, per_frame=16, fps=15),
+        ]
+        results = [
+            simulate(nbytes=args.bytes, redundancy=args.redundancy,
+                     drop=args.drop, trials=args.trials, seed=args.seed, **c)
+            for c in configs
+        ]
+    else:
+        results = [simulate(
+            nbytes=args.bytes, split=args.split, per_frame=args.per_frame,
+            fps=args.fps, redundancy=args.redundancy, drop=args.drop,
+            trials=args.trials, seed=args.seed,
+        )]
+
+    print(f"Simulated goodput ({args.bytes} B payload, "
+          f"{args.trials} trials each):", file=sys.stderr)
+    print(format_table(results))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pytxqr",
@@ -125,6 +155,27 @@ def build_parser() -> argparse.ArgumentParser:
     dec.add_argument("-o", "--output", default="-",
                      help="output file ('-' for stdout)")
     dec.set_defaults(func=cmd_decode)
+
+    bench = sub.add_parser(
+        "bench", help="simulate playback and report data goodput")
+    bench.add_argument("--bytes", type=int, default=4096,
+                       help="payload size to simulate (default: 4096)")
+    bench.add_argument("--split", type=int, default=100,
+                       help="chunk size per QR frame (default: 100)")
+    bench.add_argument("--per-frame", type=int, default=9,
+                       help="QR codes per animation frame (default: 9)")
+    bench.add_argument("--fps", type=int, default=10, help="animation FPS")
+    bench.add_argument("--redundancy", type=float, default=2.0,
+                       help="fountain-code redundancy factor (default: 2.0)")
+    bench.add_argument("--drop", type=float, default=0.0,
+                       help="per-QR miss probability, 0..1 (default: 0.0)")
+    bench.add_argument("--trials", type=int, default=5,
+                       help="simulations to average (default: 5)")
+    bench.add_argument("--seed", type=int, default=None,
+                       help="RNG seed for reproducible runs")
+    bench.add_argument("--sweep", action="store_true",
+                       help="run a preset sweep of configurations")
+    bench.set_defaults(func=cmd_bench)
 
     return parser
 
